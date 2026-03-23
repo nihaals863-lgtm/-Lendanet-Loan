@@ -33,3 +33,25 @@ exports.updateSetting = async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 };
+
+exports.updateBatch = async (req, res) => {
+    try {
+        const settings = req.body;
+        const keys = Object.keys(settings);
+        
+        for (const key of keys) {
+            const value = settings[key];
+            const strValue = typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);
+            
+            await db.query(
+                'INSERT INTO system_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?',
+                [key, strValue, strValue]
+            );
+        }
+        
+        res.json({ message: 'Settings updated successfully' });
+    } catch (err) {
+        console.error('Error updating batch settings:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+};

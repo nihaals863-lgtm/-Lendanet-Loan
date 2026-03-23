@@ -42,7 +42,16 @@ exports.register = async (req, res) => {
         // Generate a referral code for the new user if they don't have one
         const userReferralCode = name.substring(0, 3).toUpperCase() + Math.floor(1000 + Math.random() * 9000);
 
-        const initialStatus = role === 'borrower' ? 'active' : 'pending';
+        // Check if test mode is enabled
+        const [testModeRows] = await db.execute('SELECT setting_value FROM system_settings WHERE setting_key = ?', ['allow_test_accounts']);
+        const isTestMode = testModeRows.length > 0 && testModeRows[0].setting_value === 'true';
+
+        let initialStatus = role === 'borrower' ? 'active' : 'pending';
+        
+        // If test mode is on, all accounts are active immediately
+        if (isTestMode) {
+            initialStatus = 'active';
+        }
 
         // Insert user
         const [result] = await db.execute(
@@ -50,7 +59,7 @@ exports.register = async (req, res) => {
             [name, phone, email, hashedPassword, businessName, licenseUrl, userReferralCode, role, initialStatus]
         );
 
-        // If it is a borrower, we should also create a borrower profile
+        // ... (borrower and referral logic remains same)
         if (role === 'borrower') {
             await db.execute(
                 'INSERT INTO borrowers (name, nrc, phone) VALUES (?, ?, ?)',
@@ -58,7 +67,6 @@ exports.register = async (req, res) => {
             );
         }
 
-        // Handle referral link if provided
         if (referralCode) {
             const [referrer] = await db.execute('SELECT id FROM users WHERE referral_code = ?', [referralCode]);
             if (referrer.length > 0) {
@@ -68,8 +76,11 @@ exports.register = async (req, res) => {
         }
 
         res.status(201).json({ 
-            message: 'Registration successful. Please verify OTP.',
-            userId: result.insertId
+            message: isTestMode 
+                ? 'Test registration successful! Account is active.' 
+                : 'Registration successful. Please verify OTP.',
+            userId: result.insertId,
+            testMode: isTestMode
         });
     } catch (error) {
         console.error('Registration Error:', error);

@@ -8,5 +8,6 @@ router.get('/', settingsController.getSettings);
 
 // Admin only route to update settings
 router.post('/update', protect, admin, settingsController.updateSetting);
+router.post('/update-batch', protect, admin, settingsController.updateBatch);
 
 module.exports = router;

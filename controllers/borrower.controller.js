@@ -38,12 +38,20 @@ exports.addBorrower = async (req, res) => {
     }
 };
 
-// Get All Borrowers for a Lender
+// Get All Borrowers for a Lender (with stats and shared risk)
 exports.getLenderBorrowers = async (req, res) => {
     try {
         const lenderId = req.user.id;
         const [borrowers] = await db.execute(
-            `SELECT b.* FROM borrowers b 
+            `SELECT b.*, 
+                (SELECT COUNT(*) FROM loans WHERE borrower_id = b.id) as totalLoans,
+                (SELECT COUNT(*) FROM loans WHERE borrower_id = b.id AND status = 'default') as totalDefaults,
+                CASE 
+                    WHEN EXISTS (SELECT 1 FROM loans WHERE borrower_id = b.id AND status = 'default') THEN 'RED'
+                    WHEN EXISTS (SELECT 1 FROM loans WHERE borrower_id = b.id AND status = 'active') THEN 'AMBER'
+                    ELSE 'GREEN'
+                END as risk
+             FROM borrowers b 
              JOIN lender_borrowers lb ON b.id = lb.borrower_id 
              WHERE lb.lender_id = ?`,
             [lenderId]
@@ -114,28 +122,33 @@ exports.enableLogin = async (req, res) => {
 
         // 2. Check if user already exists
         const [existing] = await db.execute('SELECT * FROM users WHERE phone = ? OR nrc = ?', [b.phone, b.nrc]);
-        if (existing.length > 0) {
-            return res.status(400).json({ message: 'Login is already enabled for this borrower' });
-        }
-
-        // 3. Generate random password
+        
+        // Generate random password
         const plainPassword = 'LN@' + Math.floor(100000 + Math.random() * 899999);
         const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
-        // 4. Generate referral code
-        const referralCode = b.name.substring(0, 3).toUpperCase() + Math.floor(1000 + Math.random() * 9000);
+        // Generate a mail-format ID (using phone and domain)
+        const emailId = `${b.phone}@lendanet.com`;
 
-        // 5. Create user record
-        await db.execute(
-            'INSERT INTO users (name, phone, nrc, password, role, status, verificationStatus, referral_code) VALUES (?, ?, ?, ?, "borrower", "active", "verified", ?)',
-            [b.name, b.phone, b.nrc, hashedPassword, referralCode]
-        );
+        if (existing.length > 0) {
+            // Update existing password and email
+            await db.execute('UPDATE users SET password = ?, email = ? WHERE id = ?', [hashedPassword, emailId, existing[0].id]);
+        } else {
+            // 3. Generate referral code
+            const referralCode = b.name.substring(0, 3).toUpperCase() + Math.floor(1000 + Math.random() * 9000);
+
+            // 4. Create user record with email
+            await db.execute(
+                'INSERT INTO users (name, phone, nrc, email, password, role, status, verificationStatus, referral_code) VALUES (?, ?, ?, ?, ?, "borrower", "active", "verified", ?)',
+                [b.name, b.phone, b.nrc, emailId, hashedPassword, referralCode]
+            );
+        }
 
         // In a real app, send SMS here. For now, we return it.
         res.json({
-            message: 'Login enabled successfully',
+            message: existing.length > 0 ? 'Password reset and details shared' : 'Login enabled successfully',
             credentials: {
-                phone: b.phone,
+                id: emailId,
                 password: plainPassword
             }
         });

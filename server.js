@@ -37,6 +37,7 @@ const referralRoutes = require('./routes/referral.routes');
 const adminRoutes = require('./routes/admin.routes');
 const statsRoutes = require('./routes/stats.routes');
 const settingsRoutes = require('./routes/settings.routes');
+const reportsRoutes = require('./routes/reports.routes');
 
 // Route Middlewares
 app.use('/api/auth', authRoutes);
@@ -47,6 +48,7 @@ app.use('/api/referrals', referralRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/reports', reportsRoutes);
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
