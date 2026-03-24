@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(255) NOT NULL,
     phone VARCHAR(20) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE,
-    nrc VARCHAR(50) UNIQUE,
+    nrc VARCHAR(50) UNIQUE, -- Format: XXXXXX/XX/X (e.g. 123456/78/1)
     password VARCHAR(255) NOT NULL,
     business_name VARCHAR(255),
     license_url TEXT,
@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
     referral_code VARCHAR(50) UNIQUE,
     isPaid BOOLEAN DEFAULT FALSE,
     verificationStatus ENUM('pending', 'verified', 'rejected') DEFAULT 'pending',
+    membership_tier VARCHAR(20) DEFAULT 'free',
     status ENUM('pending', 'active', 'disabled') NOT NULL DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -26,10 +27,12 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS borrowers (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    nrc VARCHAR(50) UNIQUE NOT NULL,
+    nrc VARCHAR(50) UNIQUE NOT NULL, -- Format: XXXXXX/XX/X (e.g. 123456/78/1)
+    email VARCHAR(255) UNIQUE,
     phone VARCHAR(20) NOT NULL,
     dob DATE,
     photo_url TEXT,
+    verificationStatus ENUM('pending', 'verified', 'rejected') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -59,6 +62,8 @@ CREATE TABLE IF NOT EXISTS loans (
     guarantor_phone VARCHAR(20),
     guarantor_nrc VARCHAR(50),
     status ENUM('active', 'paid', 'default', 'locked') NOT NULL DEFAULT 'active',
+    created_by INT,
+    updated_by INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (lender_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -134,19 +139,19 @@ CREATE TABLE IF NOT EXISTS membership_plans (
     status ENUM('active', 'inactive') DEFAULT 'active'
 );
 
--- 11. Subscriptions
-CREATE TABLE IF NOT EXISTS subscriptions (
+-- 12. Upgrade Requests (Manual Flow)
+CREATE TABLE IF NOT EXISTS upgrade_requests (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
     plan_id INT NOT NULL,
-    start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    end_date TIMESTAMP NOT NULL,
-    status ENUM('active', 'expired', 'cancelled') DEFAULT 'active',
+    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (plan_id) REFERENCES membership_plans(id) ON DELETE CASCADE
 );
 
--- 12. Audit Logs
+-- 13. Audit Logs
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT,
@@ -180,3 +185,10 @@ CREATE TABLE IF NOT EXISTS system_settings (
 );
 
 INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('borrower_self_registration', 'true');
+INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('default_threshold', '3');
+INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('default_period_days', '30');
+
+-- 16. Seed Membership Plans
+INSERT IGNORE INTO membership_plans (id, name, price, duration_days, features_json, status) VALUES 
+(1, 'Free', 0.00, 30, '{"search": false, "risk": false, "history": false}', 'active'),
+(2, 'Premium', 10.00, 30, '{"search": true, "risk": true, "history": true}', 'active');

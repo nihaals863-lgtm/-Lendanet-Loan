@@ -27,6 +27,10 @@ exports.createLoan = async (req, res) => {
             );
         }
 
+        // 3. Add Audit Log
+        await db.execute('INSERT INTO audit_logs (action, user_id, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)', 
+            ['CREATE_LOAN', lenderId, 'loan', loanId, `Loan of K${amount} created for borrower ID: ${borrowerId}`]);
+
         res.status(201).json({ message: 'Loan created and installments generated', loanId });
     } catch (error) {
         console.error(error);
@@ -60,6 +64,10 @@ exports.addPayment = async (req, res) => {
             await db.execute('UPDATE loans SET status = "paid" WHERE id = ?', [id]);
         }
 
+        // 4. Add Audit Log
+        await db.execute('INSERT INTO audit_logs (action, user_id, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)', 
+            ['ADD_PAYMENT', req.user.id, 'loan', id, `Payment of K${amount} added for loan ID: ${id}`]);
+
         res.json({ message: 'Payment added successfully' });
     } catch (error) {
         console.error(error);
@@ -67,7 +75,26 @@ exports.addPayment = async (req, res) => {
     }
 };
 
-// Mark Default (Logic: Min 3 missed payments)
+// Undo Mark As Paid
+exports.undoMarkAsPaid = async (req, res) => {
+    try {
+        const { id } = req.params; // Loan ID
+        
+        // 1. Update loan status back to active
+        await db.execute('UPDATE loans SET status = "active" WHERE id = ?', [id]);
+
+        // 2. Add Audit Log
+        await db.execute('INSERT INTO audit_logs (action, user_id, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)', 
+            ['UNDO_MARK_PAID', req.user.id, 'loan', id, `Undo 'paid' status for loan ID: ${id}`]);
+
+        res.json({ message: 'Loan status reverted to active' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server error reverting status' });
+    }
+};
+
+// Mark Default (Logic: Based on configured system threshold)
 exports.markDefault = async (req, res) => {
     try {
         const { id } = req.params; // Loan ID
@@ -85,6 +112,10 @@ exports.markDefault = async (req, res) => {
             'INSERT INTO default_ledger (nrc, loan_id, lender_id, amount) VALUES (?, ?, ?, ?)',
             [loanInfo[0].nrc, id, loanInfo[0].lender_id, loanInfo[0].amount]
         );
+
+        // 4. Add Audit Log
+        await db.execute('INSERT INTO audit_logs (action, user_id, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)', 
+            ['MARK_DEFAULT', req.user.id, 'loan', id, `Loan ID: ${id} marked as default`]);
 
         res.json({ message: 'Loan marked as default and added to shared ledger' });
     } catch (error) {

@@ -8,6 +8,7 @@ router.post('/approve-lender', protect, admin, adminController.approveLender);
 router.get('/defaults', protect, admin, adminController.getDefaults);
 router.post('/remove-default', protect, admin, adminController.removeDefault);
 router.get('/borrowers', protect, admin, adminController.getAllBorrowers);
+router.post('/approve-borrower', protect, admin, adminController.approveBorrower);
 router.get('/loans', protect, admin, adminController.getAllLoans);
 router.get('/audit-logs', protect, admin, adminController.getAuditLogs);
 router.get('/referrals', protect, admin, adminController.getReferrals);
@@ -15,5 +16,7 @@ router.get('/membership-plans', protect, admin, adminController.getMembershipPla
 router.post('/membership-plans/:id', protect, admin, adminController.updateMembershipPlan);
 router.get('/settings', protect, admin, adminController.getSettings);
 router.post('/settings', protect, admin, adminController.updateSetting);
+router.post('/update-membership', protect, admin, adminController.updateMembership);
+router.post('/update-lender-status', protect, admin, adminController.updateLenderStatus);
 
 module.exports = router;

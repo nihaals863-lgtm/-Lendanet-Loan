@@ -7,7 +7,7 @@ exports.register = async (req, res) => {
     try {
         console.log('Registration Request Body:', req.body);
         console.log('Registration Files:', req.files);
-        let { name, phone, email, password, businessName, referralCode, role } = req.body;
+        let { name, phone, email, password, businessName, referralCode, role, nrc } = req.body;
         
         // Default role to lender if not provided
         role = role === 'borrower' ? 'borrower' : 'lender';
@@ -26,61 +26,66 @@ exports.register = async (req, res) => {
             }
         }
 
-        if (!name || !phone || !password) {
-            return res.status(400).json({ message: 'Missing required fields: name, phone, or password' });
+        // 1. Basic Validation
+        if (!name || !phone || !password || !role) {
+            return res.status(400).json({ message: 'All required fields must be filled' });
         }
 
-        // Check if user exists
-        const [existing] = await db.execute('SELECT * FROM users WHERE phone = ? OR email = ?', [phone, email]);
+        // 2. NRC Validation (for borrowers or if provided)
+        if (role === 'borrower' || nrc) {
+            if (!nrc) return res.status(400).json({ message: 'NRC is required for borrowers' });
+            const nrcRegex = /^\d{6}\/\d{2}\/\d{1}$/;
+            if (!nrcRegex.test(nrc)) {
+                return res.status(400).json({ message: 'Invalid NRC format. Expected: XXXXXX/XX/X' });
+            }
+        }
+
+        // 3. Check for existing user (Phone or Email or NRC)
+        const [existing] = await db.execute(
+            'SELECT * FROM users WHERE phone = ? OR (email IS NOT NULL AND email = ?) OR (nrc IS NOT NULL AND nrc = ?)',
+            [phone, email || '---', nrc || '---']
+        );
         if (existing.length > 0) {
-            return res.status(400).json({ message: 'User with this phone or email already exists' });
+            if (existing[0].phone === phone) return res.status(400).json({ message: 'Phone number already registered' });
+            if (existing[0].email === email) return res.status(400).json({ message: 'Email already registered' });
+            if (existing[0].nrc === nrc)   return res.status(400).json({ message: 'NRC already registered' });
         }
 
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Generate a referral code for the new user if they don't have one
-        const userReferralCode = name.substring(0, 3).toUpperCase() + Math.floor(1000 + Math.random() * 9000);
+        // Generate a referral code for the new user
+        const userReferralCode = (name.substring(0, 3).toUpperCase() + Math.floor(1000 + Math.random() * 9000)) || 'REF' + Date.now();
 
-        // Check if test mode is enabled
-        const [testModeRows] = await db.execute('SELECT setting_value FROM system_settings WHERE setting_key = ?', ['allow_test_accounts']);
-        const isTestMode = testModeRows.length > 0 && testModeRows[0].setting_value === 'true';
+        const initialStatus = 'pending'; // All self-registered users (Lenders & Borrowers) start as pending
 
-        let initialStatus = role === 'borrower' ? 'active' : 'pending';
-        
-        // If test mode is on, all accounts are active immediately
-        if (isTestMode) {
-            initialStatus = 'active';
-        }
-
-        // Insert user
+        // 4. Insert user
         const [result] = await db.execute(
-            'INSERT INTO users (name, phone, email, password, business_name, license_url, referral_code, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [name, phone, email, hashedPassword, businessName, licenseUrl, userReferralCode, role, initialStatus]
+            'INSERT INTO users (name, phone, email, nrc, password, business_name, license_url, referral_code, role, status, membership_tier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "free")',
+            [name, phone, email || null, nrc || null, hashedPassword, businessName || null, licenseUrl || null, userReferralCode, role, initialStatus]
         );
 
-        // ... (borrower and referral logic remains same)
-        if (role === 'borrower') {
+        const newUserId = result.insertId || null;
+        // 5. If it is a borrower, we should also create a borrower profile
+        if (role === 'borrower' && newUserId) {
             await db.execute(
-                'INSERT INTO borrowers (name, nrc, phone) VALUES (?, ?, ?)',
-                [name, 'PENDING_' + result.insertId, phone] 
+                'INSERT INTO borrowers (name, nrc, phone) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE phone = ?',
+                [name, nrc, phone, phone] 
             );
         }
 
-        if (referralCode) {
+        // Handle referral link if provided
+        if (referralCode && newUserId) {
             const [referrer] = await db.execute('SELECT id FROM users WHERE referral_code = ?', [referralCode]);
-            if (referrer.length > 0) {
+            if (referrer && referrer.length > 0) {
                 await db.execute('INSERT INTO referrals (referrer_id, referred_user_id, status) VALUES (?, ?, ?)', 
-                    [referrer[0].id, result.insertId, 'pending']);
+                    [referrer[0].id || null, newUserId, 'pending']);
             }
         }
 
         res.status(201).json({ 
-            message: isTestMode 
-                ? 'Test registration successful! Account is active.' 
-                : 'Registration successful. Please verify OTP.',
-            userId: result.insertId,
-            testMode: isTestMode
+            message: 'Registration successful. Please verify OTP.',
+            userId: newUserId
         });
     } catch (error) {
         console.error('Registration Error:', error);

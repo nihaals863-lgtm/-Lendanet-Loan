@@ -3,7 +3,7 @@ const db = require('../config/db');
 // Add or Reuse Borrower
 exports.addBorrower = async (req, res) => {
     try {
-        const { name, nrc, phone, dob } = req.body;
+        const { name, nrc, email, phone, dob } = req.body;
         const photoUrl = req.file ? `/uploads/${req.file.filename}` : null;
         const lenderId = req.user.id; // From JWT
 
@@ -16,8 +16,8 @@ exports.addBorrower = async (req, res) => {
         } else {
             // 2. Create new borrower
             const [result] = await db.execute(
-                'INSERT INTO borrowers (name, nrc, phone, dob, photo_url) VALUES (?, ?, ?, ?, ?)',
-                [name, nrc, phone, dob, photoUrl]
+                'INSERT INTO borrowers (name, nrc, email, phone, dob, photo_url) VALUES (?, ?, ?, ?, ?, ?)',
+                [name, nrc, email || null, phone, dob || null, photoUrl]
             );
             borrowerId = result.insertId;
         }
@@ -38,25 +38,54 @@ exports.addBorrower = async (req, res) => {
     }
 };
 
-// Get All Borrowers for a Lender (with stats and shared risk)
+// Get All Borrowers for a Lender
 exports.getLenderBorrowers = async (req, res) => {
     try {
         const lenderId = req.user.id;
+        
+        // 1. Get threshold
+        const [settings] = await db.execute('SELECT setting_value FROM system_settings WHERE setting_key = "default_threshold"');
+        const threshold = settings.length > 0 ? parseInt(settings[0].setting_value) : 3;
+
+        // 2. Query with aggregates
         const [borrowers] = await db.execute(
-            `SELECT b.*, 
-                (SELECT COUNT(*) FROM loans WHERE borrower_id = b.id) as totalLoans,
-                (SELECT COUNT(*) FROM loans WHERE borrower_id = b.id AND status = 'default') as totalDefaults,
-                CASE 
-                    WHEN EXISTS (SELECT 1 FROM loans WHERE borrower_id = b.id AND status = 'default') THEN 'RED'
-                    WHEN EXISTS (SELECT 1 FROM loans WHERE borrower_id = b.id AND status = 'active') THEN 'AMBER'
-                    ELSE 'GREEN'
-                END as risk
+            `SELECT b.*,
+             (SELECT COUNT(*) FROM loans WHERE borrower_id = b.id) as totalLoans,
+             (SELECT COUNT(*) FROM loans WHERE borrower_id = b.id AND status = 'default') as totalDefaults,
+             (SELECT COUNT(*) FROM loan_installments li JOIN loans l ON li.loan_id = l.id WHERE l.borrower_id = b.id AND li.status = 'pending' AND li.due_date < CURRENT_DATE) as missedCount
              FROM borrowers b 
              JOIN lender_borrowers lb ON b.id = lb.borrower_id 
              WHERE lb.lender_id = ?`,
             [lenderId]
         );
-        res.json(borrowers);
+
+        // 3. User info for membership check
+        const [user] = await db.execute('SELECT membership_tier FROM users WHERE id = ?', [lenderId]);
+        const isFree = user[0].membership_tier === 'free';
+
+        // 4. Map risk and filter sensitive data
+        const formatted = borrowers.map(b => {
+             let risk = 'GREEN';
+             if (b.totalDefaults > 0 || b.missedCount >= threshold) risk = 'RED';
+             else if (b.missedCount > 0) risk = 'AMBER';
+             
+             const result = { ...b, risk };
+             
+             // If free tier, hide risk level if required (though user said free user can add/manage borrowers)
+             // But user also said "Restrict: Risk score, Advanced data, Default ledger"
+             // For THEIR OWN borrowers, maybe they should see it?
+             // "Free plan me sirf ye allowed hona chahiye: Borrowers add & manage, Loan create & track, Loan mark as repaid/defaulted"
+             // Let's keep risk level for their own borrowers but maybe hide from others?
+             // Actually, the user's specific request was: "Free user ko bhi Risk levels / Default ledger Sab dikh raha hai (jo nahi dikhna chahiye)"
+             if (isFree) {
+                 result.risk = 'HIDDEN';
+                 result.totalDefaults = 'HIDDEN';
+             }
+
+             return result;
+        });
+
+        res.json(formatted);
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server error fetching borrowers' });
@@ -82,26 +111,54 @@ exports.getRiskSummary = async (req, res) => {
             [id]
         );
 
-        // 3. Simple Risk Engine Logic
+        // 3. Check membership & relationship
+        const lenderId = req.user.id;
+        const [user] = await db.execute('SELECT membership_tier FROM users WHERE id = ?', [lenderId]);
+        const isFree = user[0].membership_tier === 'free';
+        
+        const [relation] = await db.execute('SELECT id FROM lender_borrowers WHERE lender_id = ? AND borrower_id = ?', [lenderId, id]);
+        const hasRelation = relation.length > 0;
+
+        // 4. Simple Risk Engine Logic
         let riskLevel = 'Green';
+        
+        const [settingsRows] = await db.execute('SELECT setting_value FROM system_settings WHERE setting_key = "default_threshold"');
+        const threshold = settingsRows.length > 0 ? parseInt(settingsRows[0].setting_value) : 3;
+
         if (stats[0].defaultCount > 0) {
             riskLevel = 'Red';
         } else if (stats[0].totalLoans > 0) {
-            // Check for missed installments (Amber logic)
             const [missed] = await db.execute(
                 `SELECT COUNT(*) as missedCount FROM loan_installments li
                  JOIN loans l ON li.loan_id = l.id
                  WHERE l.borrower_id = ? AND li.status = 'pending' AND li.due_date < CURRENT_DATE`,
                 [id]
             );
-            if (missed[0].missedCount > 0) riskLevel = 'Amber';
+            if (missed[0].missedCount >= threshold) riskLevel = 'Red';
+            else if (missed[0].missedCount > 0) riskLevel = 'Amber';
         }
 
-        res.json({
-            borrower: borrower[0],
-            riskLevel,
-            ...stats[0]
-        });
+        const response = {
+            borrower: {
+                ...borrower[0],
+                phone: hasRelation ? borrower[0].phone : '********',
+                email: hasRelation ? borrower[0].email : '********',
+                dob: hasRelation ? borrower[0].dob : '********'
+            }
+        };
+
+        if (isFree && !hasRelation) {
+            response.riskLevel = 'HIDDEN';
+            response.isRestricted = true;
+            response.message = 'Upgrade to Premium to view risk data.';
+        } else {
+            response.riskLevel = riskLevel;
+            response.totalLoans = stats[0].totalLoans;
+            response.activeLoans = stats[0].activeLoans;
+            response.defaultCount = stats[0].defaultCount;
+        }
+
+        res.json(response);
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server error' });
@@ -122,33 +179,28 @@ exports.enableLogin = async (req, res) => {
 
         // 2. Check if user already exists
         const [existing] = await db.execute('SELECT * FROM users WHERE phone = ? OR nrc = ?', [b.phone, b.nrc]);
-        
-        // Generate random password
+        if (existing.length > 0) {
+            return res.status(400).json({ message: 'Login is already enabled for this borrower' });
+        }
+
+        // 3. Generate random password
         const plainPassword = 'LN@' + Math.floor(100000 + Math.random() * 899999);
         const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
-        // Generate a mail-format ID (using phone and domain)
-        const emailId = `${b.phone}@lendanet.com`;
+        // 4. Generate referral code
+        const referralCode = b.name.substring(0, 3).toUpperCase() + Math.floor(1000 + Math.random() * 9000);
 
-        if (existing.length > 0) {
-            // Update existing password and email
-            await db.execute('UPDATE users SET password = ?, email = ? WHERE id = ?', [hashedPassword, emailId, existing[0].id]);
-        } else {
-            // 3. Generate referral code
-            const referralCode = b.name.substring(0, 3).toUpperCase() + Math.floor(1000 + Math.random() * 9000);
-
-            // 4. Create user record with email
-            await db.execute(
-                'INSERT INTO users (name, phone, nrc, email, password, role, status, verificationStatus, referral_code) VALUES (?, ?, ?, ?, ?, "borrower", "active", "verified", ?)',
-                [b.name, b.phone, b.nrc, emailId, hashedPassword, referralCode]
-            );
-        }
+        // 5. Create user record
+        await db.execute(
+            'INSERT INTO users (name, phone, email, nrc, password, role, status, verificationStatus, referral_code) VALUES (?, ?, ?, ?, ?, "borrower", "active", "verified", ?)',
+            [b.name, b.phone, b.email || null, b.nrc, hashedPassword, referralCode]
+        );
 
         // In a real app, send SMS here. For now, we return it.
         res.json({
-            message: existing.length > 0 ? 'Password reset and details shared' : 'Login enabled successfully',
+            message: 'Login enabled successfully',
             credentials: {
-                id: emailId,
+                phone: b.phone,
                 password: plainPassword
             }
         });
@@ -161,11 +213,11 @@ exports.enableLogin = async (req, res) => {
 exports.updateBorrower = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, phone, dob } = req.body;
+        const { name, phone, email, dob } = req.body;
         
         await db.execute(
-            'UPDATE borrowers SET name = ?, phone = ?, dob = ? WHERE id = ?',
-            [name, phone, dob, id]
+            'UPDATE borrowers SET name = ?, phone = ?, email = ?, dob = ? WHERE id = ?',
+            [name, phone, email || null, dob || null, id]
         );
 
         res.json({ message: 'Borrower updated successfully' });

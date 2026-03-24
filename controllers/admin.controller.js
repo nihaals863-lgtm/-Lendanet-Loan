@@ -12,7 +12,7 @@ exports.getPendingLenders = async (req, res) => {
 exports.approveLender = async (req, res) => {
     try {
         const { userId } = req.body;
-        await db.execute('UPDATE users SET verificationStatus = "verified", status = "active" WHERE id = ?', [userId]);
+        await db.execute('UPDATE users SET verificationStatus = "verified", status = "active", membership_tier = "free" WHERE id = ?', [userId]);
         
         // Add audit log
         await db.execute('INSERT INTO audit_logs (action, user_id, details) VALUES (?, ?, ?)', 
@@ -24,15 +24,60 @@ exports.approveLender = async (req, res) => {
     }
 };
 
+exports.approveBorrower = async (req, res) => {
+    try {
+        const { borrowerId } = req.body;
+        // 1. Get borrower info to find NRC
+        const [borrower] = await db.execute('SELECT nrc FROM borrowers WHERE id = ?', [borrowerId]);
+        if (borrower.length === 0) return res.status(404).json({ message: 'Borrower not found' });
+        
+        // 2. Update user status via NRC
+        await db.execute('UPDATE users SET verificationStatus = "verified", status = "active" WHERE nrc = ? AND role = "borrower"', [borrower[0].nrc]);
+        
+        // 3. Update borrower profile verification
+        await db.execute('UPDATE borrowers SET verificationStatus = "verified" WHERE id = ?', [borrowerId]);
+        
+        // Add audit log
+        await db.execute('INSERT INTO audit_logs (action, user_id, details) VALUES (?, ?, ?)', 
+            ['APPROVE_BORROWER', req.user.id, `Approved borrower ID: ${borrowerId}`]);
+
+        res.json({ message: 'Borrower approved successfully' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 exports.getAllBorrowers = async (req, res) => {
     try {
+        // 1. Get threshold
+        const [settings] = await db.execute('SELECT setting_value FROM system_settings WHERE setting_key = "default_threshold"');
+        const threshold = settings.length > 0 ? parseInt(settings[0].setting_value) : 3;
+
+        // 2. Main query
         const [borrowers] = await db.execute(`
             SELECT b.*, 
-            (SELECT GROUP_CONCAT(u.name SEPARATOR ', ') FROM lender_borrowers lb JOIN users u ON lb.lender_id = u.id WHERE lb.borrower_id = b.id) as lenderName,
-            (SELECT COUNT(*) FROM loans WHERE borrower_id = b.id) as totalLoans
+            u.status as userStatus,
+            u.verificationStatus as userVerification,
+            u.membership_tier as membershipTier,
+            u.id as user_id,
+            (SELECT GROUP_CONCAT(u2.name SEPARATOR ', ') FROM lender_borrowers lb JOIN users u2 ON lb.lender_id = u2.id WHERE lb.borrower_id = b.id) as lenderName,
+            (SELECT COUNT(*) FROM loans WHERE borrower_id = b.id) as totalLoans,
+            (SELECT COUNT(*) FROM loans WHERE borrower_id = b.id AND status = 'default') as defaultCount,
+            (SELECT COUNT(*) FROM loan_installments li JOIN loans l ON li.loan_id = l.id WHERE l.borrower_id = b.id AND li.status = 'pending' AND li.due_date < CURRENT_DATE) as missedCount
             FROM borrowers b
+            LEFT JOIN users u ON b.nrc = u.nrc AND u.role = 'borrower'
         `);
-        res.json(borrowers);
+
+        // 3. Map risk level
+        const formatted = borrowers.map(b => {
+            let risk = 'GREEN';
+            if (b.defaultCount > 0 || b.missedCount >= threshold) risk = 'RED';
+            else if (b.missedCount > 0) risk = 'AMBER';
+            
+            return { ...b, risk };
+        });
+
+        res.json(formatted);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -41,12 +86,25 @@ exports.getAllBorrowers = async (req, res) => {
 exports.getAllLoans = async (req, res) => {
     try {
         const [loans] = await db.execute(`
-            SELECT l.*, b.name as borrowerName, u.name as lenderName
+            SELECT l.*, b.name as borrowerName, b.nrc as borrowerNrc, 
+            u.name as lenderName, u.business_name as lenderBusiness, u.phone as lenderPhone,
+            u2.name as createdByName
             FROM loans l
             JOIN borrowers b ON l.borrower_id = b.id
             JOIN users u ON l.lender_id = u.id
+            LEFT JOIN users u2 ON l.created_by = u2.id
             ORDER BY l.created_at DESC
         `);
+
+        // Fetch installments for each loan
+        for (let loan of loans) {
+            const [installments] = await db.execute(
+                'SELECT * FROM loan_installments WHERE loan_id = ? ORDER BY due_date ASC',
+                [loan.id]
+            );
+            loan.instalmentSchedule = installments;
+        }
+
         res.json(loans);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -150,7 +208,7 @@ exports.updateMembershipPlan = async (req, res) => {
 // Admin - Get Settings
 exports.getSettings = async (req, res) => {
     try {
-        const [settings] = await db.execute('SELECT * FROM settings');
+        const [settings] = await db.execute('SELECT * FROM system_settings');
         res.json(settings);
     } catch (error) {
         console.error(error);
@@ -162,10 +220,44 @@ exports.getSettings = async (req, res) => {
 exports.updateSetting = async (req, res) => {
     try {
         const { key, value } = req.body;
-        await db.execute('UPDATE settings SET setting_value = ? WHERE setting_key = ?', [value, key]);
+        await db.execute('UPDATE system_settings SET setting_value = ? WHERE setting_key = ?', [value, key]);
+        
+        await db.execute('INSERT INTO audit_logs (action, user_id, details) VALUES (?, ?, ?)', 
+            ['UPDATE_SETTING', req.user.id, `Updated setting ${key} to: ${value}`]);
+
         res.json({ message: 'Setting updated successfully' });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server error' });
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// Admin - Update Membership Tier
+exports.updateMembership = async (req, res) => {
+    try {
+        const { userId, tier } = req.body;
+        await db.execute('UPDATE users SET membership_tier = ? WHERE id = ?', [tier, userId]);
+        
+        await db.execute('INSERT INTO audit_logs (action, user_id, details) VALUES (?, ?, ?)', 
+            ['UPDATE_MEMBERSHIP', req.user.id, `Updated user ${userId} to tier: ${tier}`]);
+
+        res.json({ message: 'Membership tier updated successfully' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// Admin - Update Lender Status (Approve/Reject)
+exports.updateLenderStatus = async (req, res) => {
+    try {
+        const { userId, status, verificationStatus } = req.body;
+        await db.execute('UPDATE users SET status = ?, verificationStatus = ? WHERE id = ?', 
+            [status, verificationStatus, userId]);
+        
+        await db.execute('INSERT INTO audit_logs (action, user_id, details) VALUES (?, ?, ?)', 
+            ['UPDATE_LENDER_STATUS', req.user.id, `Updated lender ${userId} to ${status}/${verificationStatus}`]);
+
+        res.json({ message: 'Lender status updated successfully' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
     }
 };

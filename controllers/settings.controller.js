@@ -21,37 +21,22 @@ exports.updateSetting = async (req, res) => {
         if (!key) return res.status(400).json({ message: 'Setting key is required' });
         
         // Convert boolean to string for DB storage
-        const strValue = typeof value === 'boolean' ? (value ? 'true' : 'false') : value;
+        const strValue = (typeof value === 'boolean' ? (value ? 'true' : 'false') : value) ?? null;
 
         await db.query(
             'INSERT INTO system_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?',
             [key, strValue, strValue]
         );
+
+        // Add audit log
+        if (req.user) {
+            await db.execute('INSERT INTO audit_logs (action, user_id, details) VALUES (?, ?, ?)', 
+                ['UPDATE_SETTING', req.user.id, `Updated setting ${key} to ${strValue}`]);
+        }
+
         res.json({ message: 'Setting updated successfully' });
     } catch (err) {
         console.error('Error updating setting:', err);
-        res.status(500).json({ message: 'Server error' });
-    }
-};
-
-exports.updateBatch = async (req, res) => {
-    try {
-        const settings = req.body;
-        const keys = Object.keys(settings);
-        
-        for (const key of keys) {
-            const value = settings[key];
-            const strValue = typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);
-            
-            await db.query(
-                'INSERT INTO system_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?',
-                [key, strValue, strValue]
-            );
-        }
-        
-        res.json({ message: 'Settings updated successfully' });
-    } catch (err) {
-        console.error('Error updating batch settings:', err);
         res.status(500).json({ message: 'Server error' });
     }
 };

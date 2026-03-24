@@ -20,7 +20,18 @@ async function migrate() {
             console.log("Added guarantor_nrc to loans");
         } catch(e) { console.log("guarantor_nrc might exist:", e.message); }
 
-        // 2. Create system_settings table
+        // 2. Add created_by/updated_by to loans
+        try {
+            await db.query("ALTER TABLE loans ADD COLUMN created_by INT");
+            console.log("Added created_by to loans");
+        } catch(e) { console.log("created_by might exist:", e.message); }
+
+        try {
+            await db.query("ALTER TABLE loans ADD COLUMN updated_by INT");
+            console.log("Added updated_by to loans");
+        } catch(e) { console.log("updated_by might exist:", e.message); }
+
+        // 3. Create system_settings table
         await db.query(`
             CREATE TABLE IF NOT EXISTS system_settings (
                 setting_key VARCHAR(100) PRIMARY KEY,
@@ -36,6 +47,39 @@ async function migrate() {
             VALUES ('borrower_self_registration', 'true')
         `);
         console.log("Inserted default settings");
+
+        // 4. Add verificationStatus to borrowers
+        try {
+            await db.query("ALTER TABLE borrowers ADD COLUMN verificationStatus ENUM('pending', 'verified', 'rejected') DEFAULT 'pending'");
+            console.log("Added verificationStatus to borrowers");
+        } catch(e) { console.log("verificationStatus might exist:", e.message); }
+
+        // 5. Create upgrade_requests table
+        try {
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS upgrade_requests (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    plan_id INT NOT NULL,
+                    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (plan_id) REFERENCES membership_plans(id) ON DELETE CASCADE
+                )
+            `);
+            console.log("Ensured upgrade_requests table exists");
+        } catch(e) { console.log("upgrade_requests table error:", e.message); }
+
+        // 6. Seed Membership Plans
+        try {
+            await db.query(`
+                INSERT IGNORE INTO membership_plans (id, name, price, duration_days, features_json, status) VALUES 
+                (1, 'Free', 0.00, 30, '{"search": false, "risk": false, "history": false}', 'active'),
+                (2, 'Premium', 10.00, 30, '{"search": true, "risk": true, "history": true}', 'active')
+            `);
+            console.log("Seeded membership plans");
+        } catch(e) { console.log("membership_plans seed error:", e.message); }
 
         console.log("Migration complete!");
         process.exit(0);
