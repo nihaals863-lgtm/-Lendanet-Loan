@@ -9,32 +9,88 @@ exports.addBorrower = async (req, res) => {
 
         // 1. Check if borrower exists by NRC
         let [existing] = await db.execute('SELECT * FROM borrowers WHERE nrc = ?', [nrc]);
-        let borrowerId;
 
         if (existing.length > 0) {
-            borrowerId = existing[0].id;
-        } else {
-            // 2. Create new borrower
-            const [result] = await db.execute(
-                'INSERT INTO borrowers (name, nrc, email, phone, dob, photo_url) VALUES (?, ?, ?, ?, ?, ?)',
-                [name, nrc, email || null, phone, dob || null, photoUrl]
+            const borrower = existing[0];
+            
+            // 2. Check if already linked to this lender
+            const [link] = await db.execute(
+                'SELECT * FROM lender_borrowers WHERE lender_id = ? AND borrower_id = ?',
+                [lenderId, borrower.id]
             );
-            borrowerId = result.insertId;
+
+            if (link.length > 0) {
+                return res.status(200).json({ 
+                    message: 'Borrower already exists in your ledger.',
+                    borrower_id: borrower.id
+                });
+            }
+
+            // 3. Return confirmation request
+            return res.status(200).json({
+                exists: true,
+                message: 'Borrower already exists. Please confirm before adding.',
+                borrower: {
+                    id: borrower.id,
+                    name: borrower.name,
+                    date_of_birth: borrower.dob,
+                    profile_picture: borrower.photo_url
+                }
+            });
         }
 
-        // 3. Link to lender (Ignore if already linked)
+        // 4. Create new borrower (if not exists)
+        const [result] = await db.execute(
+            'INSERT INTO borrowers (name, nrc, email, phone, dob, photo_url) VALUES (?, ?, ?, ?, ?, ?)',
+            [name, nrc, email || null, phone, dob || null, photoUrl]
+        );
+        const borrowerId = result.insertId;
+
+        // 5. Link to lender immediately for new borrowers
         await db.execute(
-            'INSERT IGNORE INTO lender_borrowers (lender_id, borrower_id) VALUES (?, ?)',
+            'INSERT INTO lender_borrowers (lender_id, borrower_id) VALUES (?, ?)',
             [lenderId, borrowerId]
         );
 
         res.status(201).json({
-            message: existing.length > 0 ? 'Borrower linked successfully' : 'Borrower created and linked',
+            message: 'Borrower created and added to your ledger.',
             borrowerId
         });
     } catch (error) {
-        console.error(error);
+        console.error('Add Borrower Error:', error);
         res.status(500).json({ message: 'Server error adding borrower' });
+    }
+};
+
+// Confirm and Attach Existing Borrower to Lender Ledger
+exports.confirmAddBorrower = async (req, res) => {
+    try {
+        const { borrower_id } = req.body;
+        const lenderId = req.user.id;
+
+        if (!borrower_id) {
+            return res.status(400).json({ message: 'Borrower ID is required' });
+        }
+
+        // Check if borrower exists
+        const [borrower] = await db.execute('SELECT * FROM borrowers WHERE id = ?', [borrower_id]);
+        if (borrower.length === 0) {
+            return res.status(404).json({ message: 'Borrower not found' });
+        }
+
+        // Link to lender (using INSERT IGNORE to prevent duplicates)
+        await db.execute(
+            'INSERT IGNORE INTO lender_borrowers (lender_id, borrower_id) VALUES (?, ?)',
+            [lenderId, borrower_id]
+        );
+
+        res.json({
+            message: 'Borrower successfully attached to your ledger.',
+            borrower_id
+        });
+    } catch (error) {
+        console.error('Confirm Add Borrower Error:', error);
+        res.status(500).json({ message: 'Server error confirming borrower addition' });
     }
 };
 

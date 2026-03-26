@@ -261,3 +261,18 @@ exports.updateLenderStatus = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
+
+// Admin - Get Single Lender Details
+exports.getLenderDetails = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const [lenders] = await db.execute('SELECT id, lender_id, name, phone, email, nrc, company_registration_number, business_name, lender_type, plan_type, role, status, verificationStatus, membership_tier, created_at FROM users WHERE id = ? AND role = "lender"', [id]);
+        
+        if (lenders.length === 0) {
+            return res.status(404).json({ message: 'Lender not found' });
+        }
+        res.json(lenders[0]);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};

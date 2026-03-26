@@ -18,5 +18,6 @@ router.get('/settings', protect, admin, adminController.getSettings);
 router.post('/settings', protect, admin, adminController.updateSetting);
 router.post('/update-membership', protect, admin, adminController.updateMembership);
 router.post('/update-lender-status', protect, admin, adminController.updateLenderStatus);
+router.get('/lender/:id', protect, admin, adminController.getLenderDetails);
 
 module.exports = router;

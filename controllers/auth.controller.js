@@ -7,7 +7,7 @@ exports.register = async (req, res) => {
     try {
         console.log('Registration Request Body:', req.body);
         console.log('Registration Files:', req.files);
-        let { name, phone, email, password, businessName, referralCode, role, nrc } = req.body;
+        let { name, phone, email, password, businessName, referralCode, role, nrc, companyRegistrationNumber, lenderType, planType } = req.body;
         
         // Default role to lender if not provided
         role = role === 'borrower' ? 'borrower' : 'lender';
@@ -28,27 +28,41 @@ exports.register = async (req, res) => {
 
         // 1. Basic Validation
         if (!name || !phone || !password || !role) {
-            return res.status(400).json({ message: 'All required fields must be filled' });
+            return res.status(400).json({ message: 'Name, Phone and Password are required' });
         }
 
-        // 2. NRC Validation (for borrowers or if provided)
-        if (role === 'borrower' || nrc) {
-            if (!nrc) return res.status(400).json({ message: 'NRC is required for borrowers' });
+        // 2. Lender-specific Validation
+        if (role === 'lender') {
+            if (!nrc && !companyRegistrationNumber) {
+                return res.status(400).json({ message: 'Either NRC or Company Registration Number is required' });
+            }
+            // Validate lender_type
+            const allowedTypes = ['individual', 'micro_lender', 'cooperative'];
+            if (!lenderType || !allowedTypes.includes(lenderType)) {
+                return res.status(400).json({ message: 'Lender type is required. Allowed: individual, micro_lender, cooperative' });
+            }
+        }
+
+        // 3. NRC Validation (if provided)
+        if (nrc) {
             const nrcRegex = /^\d{6}\/\d{2}\/\d{1}$/;
             if (!nrcRegex.test(nrc)) {
                 return res.status(400).json({ message: 'Invalid NRC format. Expected: XXXXXX/XX/X' });
             }
         }
 
-        // 3. Check for existing user (Phone or Email or NRC)
+        // 4. Check for existing user (Phone or Email or NRC or Company Reg)
         const [existing] = await db.execute(
-            'SELECT * FROM users WHERE phone = ? OR (email IS NOT NULL AND email = ?) OR (nrc IS NOT NULL AND nrc = ?)',
-            [phone, email || '---', nrc || '---']
+            'SELECT * FROM users WHERE phone = ? OR (email IS NOT NULL AND email = ?) OR (nrc IS NOT NULL AND nrc = ?) OR (company_registration_number IS NOT NULL AND company_registration_number = ?)',
+            [phone, email || '---', nrc || '---', companyRegistrationNumber || '---']
         );
         if (existing.length > 0) {
             if (existing[0].phone === phone) return res.status(400).json({ message: 'Phone number already registered' });
             if (existing[0].email === email) return res.status(400).json({ message: 'Email already registered' });
             if (existing[0].nrc === nrc)   return res.status(400).json({ message: 'NRC already registered' });
+            if (existing[0].company_registration_number === companyRegistrationNumber) {
+                return res.status(400).json({ message: 'Company Registration Number already registered' });
+            }
         }
 
         // Hash password
@@ -59,10 +73,26 @@ exports.register = async (req, res) => {
 
         const initialStatus = 'pending'; // All self-registered users (Lenders & Borrowers) start as pending
 
-        // 4. Insert user
+        // 5. Generate unique lender_id for lenders
+        let generatedLenderId = null;
+        if (role === 'lender') {
+            const [lastRow] = await db.execute(
+                "SELECT lender_id FROM users WHERE lender_id IS NOT NULL AND lender_id LIKE '001-3%' ORDER BY lender_id DESC LIMIT 1"
+            );
+            let nextNum = 3001; // Start from 001-3001
+            if (lastRow.length > 0) {
+                const lastSuffix = parseInt(lastRow[0].lender_id.split('-')[1]);
+                nextNum = lastSuffix + 1;
+            }
+            generatedLenderId = '001-' + String(nextNum);
+        }
+
+        // 6. Insert user
+        const finalPlanType = planType || 'free';
+        const finalMembershipTier = finalPlanType !== 'free' ? 'premium' : 'free';
         const [result] = await db.execute(
-            'INSERT INTO users (name, phone, email, nrc, password, business_name, license_url, referral_code, role, status, membership_tier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "free")',
-            [name, phone, email || null, nrc || null, hashedPassword, businessName || null, licenseUrl || null, userReferralCode, role, initialStatus]
+            'INSERT INTO users (name, phone, email, nrc, company_registration_number, password, business_name, lender_type, lender_id, license_url, referral_code, role, status, membership_tier, plan_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [name, phone, email || null, nrc || null, companyRegistrationNumber || null, hashedPassword, businessName || null, role === 'lender' ? lenderType : null, generatedLenderId, licenseUrl || null, userReferralCode, role, initialStatus, finalMembershipTier, finalPlanType]
         );
 
         const newUserId = result.insertId || null;
@@ -85,7 +115,8 @@ exports.register = async (req, res) => {
 
         res.status(201).json({ 
             message: 'Registration successful. Please verify OTP.',
-            userId: newUserId
+            userId: newUserId,
+            lenderId: generatedLenderId
         });
     } catch (error) {
         console.error('Registration Error:', error);
@@ -140,18 +171,29 @@ exports.login = async (req, res) => {
             user.referral_code = newCode;
         }
 
+        // Dynamic Plan Label Logic
+        let planLabel = 'Free Plan';
+        if (user.plan_type === 'monthly') planLabel = 'Premium Plan (Monthly)';
+        if (user.plan_type === 'annual') planLabel = 'Premium Plan (Annual)';
+
         res.json({
             token,
             user: {
                 id: user.id,
+                lender_id: user.lender_id,
                 name: user.name,
                 email: user.email,
                 phone: user.phone,
                 nrc: user.nrc,
+                lender_type: user.lender_type,
+                business_name: user.business_name,
                 referral_code: user.referral_code,
                 referralCode: user.referral_code, 
                 role: user.role,
-                status: user.status
+                status: user.status,
+                plan_type: user.plan_type || 'free',
+                plan_label: planLabel,
+                isPaid: user.plan_type !== 'free'
             }
         });
     } catch (error) {

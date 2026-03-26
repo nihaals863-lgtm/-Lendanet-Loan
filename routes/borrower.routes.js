@@ -12,6 +12,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 router.post('/', protect, upload.single('photo'), borrowerController.addBorrower);
+router.post('/confirm-add', protect, borrowerController.confirmAddBorrower);
 router.get('/', protect, borrowerController.getLenderBorrowers);
 router.post('/:id/enable-login', protect, borrowerController.enableLogin);
 router.get('/:id/risk', protect, borrowerController.getRiskSummary);

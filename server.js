@@ -1,10 +1,16 @@
+const dotenv = require('dotenv');
+const result = dotenv.config();
+if (result.error) {
+    console.error('CRITICAL: .env file fail to load!', result.error);
+} else {
+    console.log('SUCCESS: Environment Variables Injected from .env');
+}
+
 const express = require('express');
 const cors = require('cors');
-const dotenv = require('dotenv');
 const path = require('path');
 
 const fs = require('fs');
-dotenv.config();
 
 // Ensure uploads directory exists
 const uploadDir = path.join(__dirname, 'uploads');
