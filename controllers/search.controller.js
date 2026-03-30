@@ -13,10 +13,33 @@ exports.searchBorrower = async (req, res) => {
             'SELECT * FROM borrowers WHERE nrc LIKE ? OR phone LIKE ? OR name LIKE ?',
             [searchPattern, searchPattern, searchPattern]
         );
-        console.log('Search results count:', borrowers.length);
+        console.log('Search results count (borrowers):', borrowers.length);
 
-        if (borrowers.length === 0) {
-            return res.status(404).json({ message: 'No borrower found' });
+        // 2. Search in users table for lenders
+        const [lenders] = await db.query(
+            'SELECT id, name, phone, email, nrc, business_name, lender_type, lender_id, plan_type, role FROM users WHERE role = "lender" AND (nrc LIKE ? OR phone LIKE ? OR name LIKE ? OR business_name LIKE ? OR lender_id LIKE ?)',
+            [searchPattern, searchPattern, searchPattern, searchPattern, searchPattern]
+        );
+        console.log('Search results count (lenders):', lenders.length);
+
+        if (borrowers.length === 0 && lenders.length === 0) {
+            return res.status(404).json({ message: 'No borrower or lender found' });
+        }
+
+        // If lender found but no borrower, return lender results
+        if (borrowers.length === 0 && lenders.length > 0) {
+            const lenderResults = lenders.map(l => ({
+                id: l.id,
+                name: l.name,
+                nrc: l.nrc,
+                phone: l.phone,
+                email: l.email,
+                business_name: l.business_name,
+                lender_type: l.lender_type,
+                lender_id: l.lender_id,
+                type: 'lender'
+            }));
+            return res.json({ type: 'lender', results: lenderResults });
         }
 
         const borrower = borrowers[0];
