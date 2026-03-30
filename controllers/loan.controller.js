@@ -3,24 +3,31 @@ const db = require('../config/db');
 // Create Loan and Generate Installments
 exports.createLoan = async (req, res) => {
     try {
-        const { borrowerId, amount, interestRate, issueDate, dueDate, type, installmentsCount, guarantorName, guarantorPhone, guarantorNrc } = req.body;
-        const lenderId = req.user.id;
+        const { borrowerId, borrower_id, amount, interestRate, interest_rate, issueDate, issue_date, dueDate, due_date, type, installmentsCount, installments, guarantorName, guarantorPhone, guarantorNrc, lender_id, admin_override } = req.body;
+        // Admin can specify a different lender_id; normal lenders use their own id
+        const lenderId = (admin_override && lender_id) ? lender_id : req.user.id;
+        const finalBorrowerId = borrowerId || borrower_id;
+        const finalAmount = amount;
+        const finalInterestRate = interestRate || interest_rate || 0;
+        const finalIssueDate = issueDate || issue_date || new Date().toISOString().split('T')[0];
+        const finalDueDate = dueDate || due_date;
+        const finalInstallmentsCount = installmentsCount || installments || 3;
 
         // 1. Insert Loan
         const [loanResult] = await db.execute(
-            'INSERT INTO loans (lender_id, borrower_id, amount, interest_rate, issue_date, due_date, type, guarantor_name, guarantor_phone, guarantor_nrc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [lenderId, borrowerId, amount, interestRate, issueDate, dueDate, type, guarantorName || null, guarantorPhone || null, guarantorNrc || null]
+            'INSERT INTO loans (lender_id, borrower_id, amount, interest_rate, issue_date, due_date, type, guarantor_name, guarantor_phone, guarantor_nrc, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [lenderId, finalBorrowerId, finalAmount, finalInterestRate, finalIssueDate, finalDueDate, type, guarantorName || null, guarantorPhone || null, guarantorNrc || null, req.user.id]
         );
         const loanId = loanResult.insertId;
 
         // 2. Generate Installments (Simple Monthly Breakdown)
-        const totalAmount = parseFloat(amount) + (parseFloat(amount) * (parseFloat(interestRate) / 100));
-        const installmentAmount = totalAmount / installmentsCount;
-        
-        for (let i = 1; i <= installmentsCount; i++) {
-            const installmentDueDate = new Date(issueDate);
+        const totalAmount = parseFloat(finalAmount) + (parseFloat(finalAmount) * (parseFloat(finalInterestRate) / 100));
+        const installmentAmount = totalAmount / finalInstallmentsCount;
+
+        for (let i = 1; i <= finalInstallmentsCount; i++) {
+            const installmentDueDate = new Date(finalIssueDate);
             installmentDueDate.setMonth(installmentDueDate.getMonth() + i);
-            
+
             await db.execute(
                 'INSERT INTO loan_installments (loan_id, due_date, amount) VALUES (?, ?, ?)',
                 [loanId, installmentDueDate, installmentAmount]
@@ -28,8 +35,8 @@ exports.createLoan = async (req, res) => {
         }
 
         // 3. Add Audit Log
-        await db.execute('INSERT INTO audit_logs (action, user_id, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)', 
-            ['CREATE_LOAN', lenderId, 'loan', loanId, `Loan of K${amount} created for borrower ID: ${borrowerId}`]);
+        await db.execute('INSERT INTO audit_logs (action, user_id, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)',
+            ['CREATE_LOAN', req.user.id, 'loan', loanId, `Loan of K${finalAmount} created for borrower ID: ${finalBorrowerId}`]);
 
         res.status(201).json({ message: 'Loan created and installments generated', loanId });
     } catch (error) {

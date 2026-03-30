@@ -61,6 +61,7 @@ exports.getAllBorrowers = async (req, res) => {
             u.membership_tier as membershipTier,
             u.id as user_id,
             (SELECT GROUP_CONCAT(u2.name SEPARATOR ', ') FROM lender_borrowers lb JOIN users u2 ON lb.lender_id = u2.id WHERE lb.borrower_id = b.id) as lenderName,
+            (SELECT GROUP_CONCAT(lb.lender_id SEPARATOR ',') FROM lender_borrowers lb WHERE lb.borrower_id = b.id) as lenderIds,
             (SELECT COUNT(*) FROM loans WHERE borrower_id = b.id) as totalLoans,
             (SELECT COUNT(*) FROM loans WHERE borrower_id = b.id AND status = 'default') as defaultCount,
             (SELECT COUNT(*) FROM loan_installments li JOIN loans l ON li.loan_id = l.id WHERE l.borrower_id = b.id AND li.status = 'pending' AND li.due_date < CURRENT_DATE) as missedCount
