@@ -19,10 +19,15 @@ exports.register = async (req, res) => {
         }
 
         let licenseUrl = null;
+        let nrcUrl = null;
         if (req.files && req.files.length > 0) {
             const licenseFile = req.files.find(f => f.fieldname === 'license');
             if (licenseFile) {
                 licenseUrl = `/uploads/${licenseFile.filename}`;
+            }
+            const nrcFile = req.files.find(f => f.fieldname === 'nrc_document');
+            if (nrcFile) {
+                nrcUrl = `/uploads/${nrcFile.filename}`;
             }
         }
 
@@ -91,8 +96,8 @@ exports.register = async (req, res) => {
         const finalPlanType = planType || 'free';
         const finalMembershipTier = finalPlanType !== 'free' ? 'premium' : 'free';
         const [result] = await db.execute(
-            'INSERT INTO users (name, phone, email, nrc, company_registration_number, password, business_name, lender_type, lender_id, license_url, referral_code, role, status, membership_tier, plan_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [name, phone, email || null, nrc || null, companyRegistrationNumber || null, hashedPassword, businessName || null, role === 'lender' ? lenderType : null, generatedLenderId, licenseUrl || null, userReferralCode, role, initialStatus, finalMembershipTier, finalPlanType]
+            'INSERT INTO users (name, phone, email, nrc, company_registration_number, password, business_name, lender_type, lender_id, license_url, nrc_url, referral_code, role, status, membership_tier, plan_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [name, phone, email || null, nrc || null, companyRegistrationNumber || null, hashedPassword, businessName || null, role === 'lender' ? lenderType : null, generatedLenderId, licenseUrl || null, nrcUrl || null, userReferralCode, role, initialStatus, finalMembershipTier, finalPlanType]
         );
 
         const newUserId = result.insertId || null;

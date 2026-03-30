@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     lender_type ENUM('individual', 'micro_lender', 'cooperative') DEFAULT NULL,
     lender_id VARCHAR(20) UNIQUE,
     license_url TEXT,
+    nrc_url TEXT,
     plan_type VARCHAR(20) DEFAULT 'free',
     role ENUM('admin', 'lender', 'borrower') NOT NULL DEFAULT 'lender',
     referral_code VARCHAR(50) UNIQUE,
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS borrowers (
     phone VARCHAR(20) NOT NULL,
     dob DATE,
     photo_url TEXT,
+    nrc_url TEXT,
     verificationStatus ENUM('pending', 'verified', 'rejected') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP

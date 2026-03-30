@@ -95,7 +95,18 @@ async function migrate() {
             } catch(e) { console.log(`${col} might exist:`, e.message); }
         }
 
-        // 8. Add requested_plan column to upgrade_requests table
+        // 8. Add nrc_url column to users and borrowers tables
+        try {
+            await db.query("ALTER TABLE users ADD COLUMN nrc_url TEXT");
+            console.log("Added nrc_url to users");
+        } catch(e) { console.log("nrc_url might exist in users:", e.message); }
+
+        try {
+            await db.query("ALTER TABLE borrowers ADD COLUMN nrc_url TEXT");
+            console.log("Added nrc_url to borrowers");
+        } catch(e) { console.log("nrc_url might exist in borrowers:", e.message); }
+
+        // 9. Add requested_plan column to upgrade_requests table
         try {
             await db.query("ALTER TABLE upgrade_requests ADD COLUMN requested_plan VARCHAR(20) DEFAULT NULL AFTER user_id");
             console.log("Added requested_plan to upgrade_requests");

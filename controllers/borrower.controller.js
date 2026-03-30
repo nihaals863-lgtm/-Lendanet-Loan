@@ -4,7 +4,16 @@ const db = require('../config/db');
 exports.addBorrower = async (req, res) => {
     try {
         const { name, nrc, email, phone, dob } = req.body;
-        const photoUrl = req.file ? `/uploads/${req.file.filename}` : null;
+        let photoUrl = null;
+        let nrcUrl = null;
+        if (req.files) {
+            const photoFile = req.files.find(f => f.fieldname === 'photo');
+            if (photoFile) photoUrl = `/uploads/${photoFile.filename}`;
+            const nrcFile = req.files.find(f => f.fieldname === 'nrc_document');
+            if (nrcFile) nrcUrl = `/uploads/${nrcFile.filename}`;
+        } else if (req.file) {
+            photoUrl = `/uploads/${req.file.filename}`;
+        }
         const lenderId = req.user.id; // From JWT
 
         // 1. Check if borrower exists by NRC
@@ -41,8 +50,8 @@ exports.addBorrower = async (req, res) => {
 
         // 4. Create new borrower (if not exists)
         const [result] = await db.execute(
-            'INSERT INTO borrowers (name, nrc, email, phone, dob, photo_url) VALUES (?, ?, ?, ?, ?, ?)',
-            [name, nrc, email || null, phone, dob || null, photoUrl]
+            'INSERT INTO borrowers (name, nrc, email, phone, dob, photo_url, nrc_url) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [name, nrc, email || null, phone, dob || null, photoUrl, nrcUrl]
         );
         const borrowerId = result.insertId;
 

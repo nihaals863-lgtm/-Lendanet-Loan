@@ -266,7 +266,7 @@ exports.updateLenderStatus = async (req, res) => {
 exports.getLenderDetails = async (req, res) => {
     try {
         const { id } = req.params;
-        const [lenders] = await db.execute('SELECT id, lender_id, name, phone, email, nrc, company_registration_number, business_name, lender_type, plan_type, role, status, verificationStatus, membership_tier, created_at FROM users WHERE id = ? AND role = "lender"', [id]);
+        const [lenders] = await db.execute('SELECT id, lender_id, name, phone, email, nrc, company_registration_number, business_name, lender_type, plan_type, license_url, nrc_url, role, status, verificationStatus, membership_tier, created_at FROM users WHERE id = ? AND role = "lender"', [id]);
         
         if (lenders.length === 0) {
             return res.status(404).json({ message: 'Lender not found' });
