@@ -130,7 +130,8 @@ exports.getDefaults = async (req, res) => {
 // Admin - Remove Default
 exports.removeDefault = async (req, res) => {
     try {
-        const { id } = req.params; // Default Ledger ID
+        const id = req.params.id || req.body.id || req.body.loanId;
+        if (!id) return res.status(400).json({ message: 'Default ID is required' });
         const [ledger] = await db.execute('SELECT loan_id FROM default_ledger WHERE id = ?', [id]);
         if (ledger.length === 0) return res.status(404).json({ message: 'Default record not found' });
 
