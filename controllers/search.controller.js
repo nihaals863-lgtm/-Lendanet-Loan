@@ -8,10 +8,12 @@ exports.searchBorrower = async (req, res) => {
 
         // 1. Search in borrowers table (partial match for NRC, phone, and name)
         const searchPattern = `%${q}%`;
-        const [borrowers] = await db.execute(
+        console.log('Search query:', q, '| Pattern:', searchPattern);
+        const [borrowers] = await db.query(
             'SELECT * FROM borrowers WHERE nrc LIKE ? OR phone LIKE ? OR name LIKE ?',
             [searchPattern, searchPattern, searchPattern]
         );
+        console.log('Search results count:', borrowers.length);
 
         if (borrowers.length === 0) {
             return res.status(404).json({ message: 'No borrower found' });
