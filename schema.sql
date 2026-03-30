@@ -196,6 +196,7 @@ INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('default
 INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('default_period_days', '30');
 
 -- 16. Seed Membership Plans
-INSERT IGNORE INTO membership_plans (id, name, price, duration_days, features_json, status) VALUES 
-(1, 'Free', 0.00, 30, '{"search": false, "risk": false, "history": false}', 'active'),
-(2, 'Premium', 10.00, 30, '{"search": true, "risk": true, "history": true}', 'active');
+INSERT IGNORE INTO membership_plans (id, name, price, duration_days, features_json, status) VALUES
+(1, 'Free', 0.00, 0, '{"search": false, "risk": false, "history": false}', 'active'),
+(2, 'Monthly', 10.00, 30, '{"search": true, "risk": true, "history": true}', 'active'),
+(3, 'Annual', 100.00, 365, '{"search": true, "risk": true, "history": true}', 'active');

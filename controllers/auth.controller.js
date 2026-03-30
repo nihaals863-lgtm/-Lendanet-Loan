@@ -240,6 +240,40 @@ exports.updateProfile = async (req, res) => {
     }
 };
 
+// Get current user profile (for refreshing user data)
+exports.getMe = async (req, res) => {
+    try {
+        const [users] = await db.execute('SELECT * FROM users WHERE id = ?', [req.user.id]);
+        if (users.length === 0) return res.status(404).json({ message: 'User not found' });
+
+        const user = users[0];
+        let planLabel = 'Free Plan';
+        if (user.plan_type === 'monthly') planLabel = 'Premium Plan (Monthly)';
+        if (user.plan_type === 'annual') planLabel = 'Premium Plan (Annual)';
+
+        res.json({
+            id: user.id,
+            lender_id: user.lender_id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            nrc: user.nrc,
+            lender_type: user.lender_type,
+            business_name: user.business_name,
+            referral_code: user.referral_code,
+            referralCode: user.referral_code,
+            role: user.role,
+            status: user.status,
+            plan_type: user.plan_type || 'free',
+            plan_label: planLabel,
+            isPaid: user.plan_type !== 'free'
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
 // Verify OTP (Mock for now)
 exports.verifyOtp = async (req, res) => {
     const { userId, otp } = req.body;

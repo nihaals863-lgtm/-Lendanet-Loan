@@ -71,14 +71,18 @@ async function migrate() {
             console.log("Ensured upgrade_requests table exists");
         } catch(e) { console.log("upgrade_requests table error:", e.message); }
 
-        // 6. Seed Membership Plans
+        // 6. Seed Membership Plans (Free, Monthly, Annual)
         try {
+            // Update existing Premium plan to Monthly
+            await db.query(`UPDATE membership_plans SET name = 'Monthly' WHERE id = 2 AND name = 'Premium'`);
+            console.log("Renamed Premium to Monthly");
+
+            // Insert Annual plan if not exists
             await db.query(`
-                INSERT IGNORE INTO membership_plans (id, name, price, duration_days, features_json, status) VALUES 
-                (1, 'Free', 0.00, 30, '{"search": false, "risk": false, "history": false}', 'active'),
-                (2, 'Premium', 10.00, 30, '{"search": true, "risk": true, "history": true}', 'active')
+                INSERT IGNORE INTO membership_plans (id, name, price, duration_days, features_json, status) VALUES
+                (3, 'Annual', 100.00, 365, '{"search": true, "risk": true, "history": true}', 'active')
             `);
-            console.log("Seeded membership plans");
+            console.log("Seeded membership plans (Free, Monthly, Annual)");
         } catch(e) { console.log("membership_plans seed error:", e.message); }
 
         // 7. Add missing columns to users table

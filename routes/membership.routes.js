@@ -3,7 +3,7 @@ const router = express.Router();
 const membershipController = require('../controllers/membership.controller');
 const { protect, admin } = require('../middleware/auth.middleware');
 
-router.get('/plans', protect, membershipController.getPlans);
+router.get('/plans', membershipController.getPlans); // Public - needed for pricing display
 router.post('/upgrade', protect, membershipController.requestUpgrade);
 
 // Admin only
