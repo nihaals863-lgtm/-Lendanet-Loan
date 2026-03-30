@@ -6,10 +6,11 @@ exports.searchBorrower = async (req, res) => {
         const q = req.query.q?.trim();
         if (!q) return res.status(400).json({ message: 'Search query is required' });
 
-        // 1. Search in borrowers table
+        // 1. Search in borrowers table (partial match for NRC, phone, and name)
+        const searchPattern = `%${q}%`;
         const [borrowers] = await db.execute(
-            'SELECT * FROM borrowers WHERE nrc = ? OR phone = ?',
-            [q, q]
+            'SELECT * FROM borrowers WHERE nrc LIKE ? OR phone LIKE ? OR name LIKE ?',
+            [searchPattern, searchPattern, searchPattern]
         );
 
         if (borrowers.length === 0) {

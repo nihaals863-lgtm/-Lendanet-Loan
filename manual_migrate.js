@@ -81,6 +81,26 @@ async function migrate() {
             console.log("Seeded membership plans");
         } catch(e) { console.log("membership_plans seed error:", e.message); }
 
+        // 7. Add missing columns to users table
+        const userColumns = [
+            { col: 'company_registration_number', sql: "ALTER TABLE users ADD COLUMN company_registration_number VARCHAR(100)" },
+            { col: 'lender_type', sql: "ALTER TABLE users ADD COLUMN lender_type ENUM('individual', 'micro_lender', 'cooperative') DEFAULT NULL" },
+            { col: 'lender_id', sql: "ALTER TABLE users ADD COLUMN lender_id VARCHAR(20) UNIQUE" },
+            { col: 'plan_type', sql: "ALTER TABLE users ADD COLUMN plan_type VARCHAR(20) DEFAULT 'free'" },
+        ];
+        for (const { col, sql } of userColumns) {
+            try {
+                await db.query(sql);
+                console.log(`Added ${col} to users`);
+            } catch(e) { console.log(`${col} might exist:`, e.message); }
+        }
+
+        // 8. Add requested_plan column to upgrade_requests table
+        try {
+            await db.query("ALTER TABLE upgrade_requests ADD COLUMN requested_plan VARCHAR(20) DEFAULT NULL AFTER user_id");
+            console.log("Added requested_plan to upgrade_requests");
+        } catch(e) { console.log("requested_plan might exist:", e.message); }
+
         console.log("Migration complete!");
         process.exit(0);
     } catch (err) {

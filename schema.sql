@@ -11,8 +11,12 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(255) UNIQUE,
     nrc VARCHAR(50) UNIQUE, -- Format: XXXXXX/XX/X (e.g. 123456/78/1)
     password VARCHAR(255) NOT NULL,
+    company_registration_number VARCHAR(100),
     business_name VARCHAR(255),
+    lender_type ENUM('individual', 'micro_lender', 'cooperative') DEFAULT NULL,
+    lender_id VARCHAR(20) UNIQUE,
     license_url TEXT,
+    plan_type VARCHAR(20) DEFAULT 'free',
     role ENUM('admin', 'lender', 'borrower') NOT NULL DEFAULT 'lender',
     referral_code VARCHAR(50) UNIQUE,
     isPaid BOOLEAN DEFAULT FALSE,
@@ -143,6 +147,7 @@ CREATE TABLE IF NOT EXISTS membership_plans (
 CREATE TABLE IF NOT EXISTS upgrade_requests (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
+    requested_plan VARCHAR(20) DEFAULT NULL,
     plan_id INT NOT NULL,
     status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
     notes TEXT,
