@@ -67,6 +67,12 @@ exports.addBorrower = async (req, res) => {
         });
     } catch (error) {
         console.error('Add Borrower Error:', error);
+        if (error.code === 'ER_DUP_ENTRY') {
+            const field = error.sqlMessage.includes('email') ? 'Email'
+                        : error.sqlMessage.includes('nrc') ? 'NRC'
+                        : error.sqlMessage.includes('phone') ? 'Phone' : 'Entry';
+            return res.status(400).json({ message: `${field} already exists. Please use a different ${field.toLowerCase()}.` });
+        }
         res.status(500).json({ message: 'Server error adding borrower' });
     }
 };

@@ -19,5 +19,6 @@ router.post('/settings', protect, admin, adminController.updateSetting);
 router.post('/update-membership', protect, admin, adminController.updateMembership);
 router.post('/update-lender-status', protect, admin, adminController.updateLenderStatus);
 router.get('/lender/:id', protect, admin, adminController.getLenderDetails);
+router.delete('/lenders/:id', protect, admin, adminController.deleteLender);
 
 module.exports = router;

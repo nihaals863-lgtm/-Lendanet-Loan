@@ -2,16 +2,27 @@ const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
+// Password strength validation helper
+function validatePassword(password) {
+    const errors = [];
+    if (password.length < 8) errors.push('at least 8 characters');
+    if (!/[A-Z]/.test(password)) errors.push('one uppercase letter');
+    if (!/[a-z]/.test(password)) errors.push('one lowercase letter');
+    if (!/[0-9]/.test(password)) errors.push('one number');
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) errors.push('one special character (!@#$%^&* etc.)');
+    return errors;
+}
+
 // Register Lender
 exports.register = async (req, res) => {
     try {
         console.log('Registration Request Body:', req.body);
         console.log('Registration Files:', req.files);
         let { name, phone, email, password, businessName, referralCode, role, nrc, companyRegistrationNumber, lenderType, planType } = req.body;
-        
+
         // Default role to lender if not provided
         role = role === 'borrower' ? 'borrower' : 'lender';
-        
+
         // Fallback for admin-created users without password
         if (!password) {
             password = 'LendaNet@' + Math.floor(100+Math.random()*900);
@@ -34,6 +45,12 @@ exports.register = async (req, res) => {
         // 1. Basic Validation
         if (!name || !phone || !password || !role) {
             return res.status(400).json({ message: 'Name, Phone and Password are required' });
+        }
+
+        // 1.5 Password strength validation
+        const pwErrors = validatePassword(password);
+        if (pwErrors.length > 0) {
+            return res.status(400).json({ message: 'Password must contain: ' + pwErrors.join(', ') });
         }
 
         // 2. Lender-specific Validation
@@ -221,6 +238,10 @@ exports.updateProfile = async (req, res) => {
         if (email) { updates.push('email = ?'); params.push(email); }
         
         if (newPassword) {
+            const pwErrors = validatePassword(newPassword);
+            if (pwErrors.length > 0) {
+                return res.status(400).json({ message: 'Password must contain: ' + pwErrors.join(', ') });
+            }
             const hashedPassword = await bcrypt.hash(newPassword, 10);
             updates.push('password = ?');
             params.push(hashedPassword);

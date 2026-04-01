@@ -264,6 +264,28 @@ exports.updateLenderStatus = async (req, res) => {
     }
 };
 
+// Admin - Delete Lender (ON DELETE CASCADE handles all related data automatically)
+exports.deleteLender = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const [lender] = await db.execute('SELECT * FROM users WHERE id = ? AND role = "lender"', [id]);
+        if (lender.length === 0) return res.status(404).json({ message: 'Lender not found' });
+
+        // Audit log before delete (since user_id will be SET NULL after cascade)
+        await db.execute('INSERT INTO audit_logs (action, user_id, details) VALUES (?, ?, ?)',
+            ['DELETE_LENDER', req.user.id, `Deleted lender: ${lender[0].name} (ID: ${id})`]);
+
+        // Just delete user - CASCADE will auto-remove all related data
+        await db.execute('DELETE FROM users WHERE id = ?', [id]);
+
+        res.json({ message: 'Lender deleted successfully' });
+    } catch (error) {
+        console.error('Delete Lender Error:', error);
+        res.status(500).json({ message: 'Server error deleting lender' });
+    }
+};
+
 // Admin - Get Single Lender Details
 exports.getLenderDetails = async (req, res) => {
     try {
