@@ -210,9 +210,10 @@ exports.login = async (req, res) => {
                 lender_type: user.lender_type,
                 business_name: user.business_name,
                 referral_code: user.referral_code,
-                referralCode: user.referral_code, 
+                referralCode: user.referral_code,
                 role: user.role,
                 status: user.status,
+                verificationStatus: user.verificationStatus || 'pending',
                 plan_type: user.plan_type || 'free',
                 plan_label: planLabel,
                 isPaid: user.plan_type !== 'free'
@@ -285,6 +286,7 @@ exports.getMe = async (req, res) => {
             referralCode: user.referral_code,
             role: user.role,
             status: user.status,
+            verificationStatus: user.verificationStatus || 'pending',
             plan_type: user.plan_type || 'free',
             plan_label: planLabel,
             isPaid: user.plan_type !== 'free'

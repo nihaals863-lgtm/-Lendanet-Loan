@@ -67,6 +67,11 @@ app.use((err, req, res, next) => {
     res.status(500).json({ message: err.message || 'Internal Server Error' });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     console.log(`Server is running on port ${PORT}`);
+    // Ensure collateral_upload_enabled setting exists in DB
+    try {
+        const db = require('./config/db');
+        await db.query("INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('collateral_upload_enabled', 'true')");
+    } catch (e) { console.log('Settings seed skipped:', e.message); }
 });

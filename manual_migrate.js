@@ -116,6 +116,13 @@ async function migrate() {
             console.log("Added requested_plan to upgrade_requests");
         } catch(e) { console.log("requested_plan might exist:", e.message); }
 
+        // 10. Add collateral_upload_enabled setting
+        await db.query(`
+            INSERT IGNORE INTO system_settings (setting_key, setting_value)
+            VALUES ('collateral_upload_enabled', 'true')
+        `);
+        console.log("Added collateral_upload_enabled setting");
+
         console.log("Migration complete!");
         process.exit(0);
     } catch (err) {

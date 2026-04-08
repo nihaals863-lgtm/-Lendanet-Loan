@@ -131,14 +131,114 @@ exports.markDefault = async (req, res) => {
     }
 };
 
+// Upload Collateral Documents for a Loan
+exports.uploadCollateral = async (req, res) => {
+    try {
+        const { id } = req.params; // Loan ID
+        const { description } = req.body;
+
+        // Check if collateral uploads are enabled
+        const [setting] = await db.execute("SELECT setting_value FROM system_settings WHERE setting_key = 'collateral_upload_enabled'");
+        if (setting.length > 0 && setting[0].setting_value === 'false') {
+            return res.status(403).json({ message: 'Collateral uploads are currently disabled by admin' });
+        }
+
+        // Verify loan exists and belongs to this lender
+        const [loan] = await db.execute('SELECT * FROM loans WHERE id = ? AND lender_id = ?', [id, req.user.id]);
+        if (loan.length === 0) return res.status(404).json({ message: 'Loan not found' });
+
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ message: 'At least one file is required' });
+        }
+
+        const uploaded = [];
+        for (const file of req.files) {
+            const fileUrl = `/uploads/${file.filename}`;
+            await db.execute(
+                'INSERT INTO collaterals (loan_id, file_url, description) VALUES (?, ?, ?)',
+                [id, fileUrl, description || null]
+            );
+            uploaded.push({ file_url: fileUrl, description });
+        }
+
+        // Audit log
+        await db.execute('INSERT INTO audit_logs (action, user_id, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)',
+            ['UPLOAD_COLLATERAL', req.user.id, 'loan', id, `${uploaded.length} collateral file(s) uploaded for loan ID: ${id}`]);
+
+        res.status(201).json({ message: `${uploaded.length} collateral document(s) uploaded`, collaterals: uploaded });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server error uploading collateral' });
+    }
+};
+
+// Get Collateral Documents for a Loan
+exports.getCollaterals = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const [collaterals] = await db.execute('SELECT * FROM collaterals WHERE loan_id = ?', [id]);
+        res.json(collaterals);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// Auto-check and mark loans as default if missed EMIs >= threshold
+async function autoMarkDefaults(lenderId) {
+    try {
+        // Get threshold from settings
+        const [settings] = await db.execute("SELECT setting_value FROM system_settings WHERE setting_key = 'default_threshold'");
+        const threshold = settings.length > 0 ? parseInt(settings[0].setting_value) : 3;
+
+        // Find active loans with missed installments >= threshold
+        const [eligibleLoans] = await db.execute(
+            `SELECT l.id, l.borrower_id, l.amount, l.lender_id, b.nrc,
+                (SELECT COUNT(*) FROM loan_installments li
+                 WHERE li.loan_id = l.id AND li.status = 'pending' AND li.due_date < CURRENT_DATE) as missedCount
+             FROM loans l
+             JOIN borrowers b ON l.borrower_id = b.id
+             WHERE l.lender_id = ? AND l.status = 'active'
+             HAVING missedCount >= ?`,
+            [lenderId, threshold]
+        );
+
+        for (const loan of eligibleLoans) {
+            // Mark as default
+            await db.execute('UPDATE loans SET status = "default" WHERE id = ?', [loan.id]);
+
+            // Add to shared default ledger
+            await db.execute(
+                'INSERT INTO default_ledger (nrc, loan_id, lender_id, amount) VALUES (?, ?, ?, ?)',
+                [loan.nrc, loan.id, loan.lender_id, loan.amount]
+            );
+
+            // Audit log
+            await db.execute(
+                'INSERT INTO audit_logs (action, user_id, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)',
+                ['AUTO_DEFAULT', lenderId, 'loan', loan.id, `Loan ID: ${loan.id} auto-marked as default (${loan.missedCount} missed EMIs, threshold: ${threshold})`]
+            );
+        }
+
+        return eligibleLoans.length;
+    } catch (error) {
+        console.error('Auto-default check error:', error);
+        return 0;
+    }
+}
+
 // Get All Loans (for dashboard/filter)
 exports.getLoans = async (req, res) => {
     try {
         const lenderId = req.user.id;
+
+        // Auto-check defaults before returning loans
+        await autoMarkDefaults(lenderId);
+
         const [loans] = await db.execute(
-            `SELECT l.*, b.name as borrowerName, b.nrc as borrowerNRC 
-             FROM loans l 
-             JOIN borrowers b ON l.borrower_id = b.id 
+            `SELECT l.*, b.name as borrowerName, b.nrc as borrowerNRC
+             FROM loans l
+             JOIN borrowers b ON l.borrower_id = b.id
              WHERE l.lender_id = ?`,
             [lenderId]
         );
@@ -194,9 +294,9 @@ exports.getMyLoans = async (req, res) => {
         if (borrowerRecord.length === 0) return res.json([]);
 
         const [loans] = await db.execute(
-            `SELECT l.*, u.name as lenderName 
-             FROM loans l 
-             JOIN users u ON l.lender_id = u.id 
+            `SELECT l.*, u.name as lenderName, u.phone as lenderPhone, u.email as lenderEmail, u.business_name as lenderBusiness
+             FROM loans l
+             JOIN users u ON l.lender_id = u.id
              WHERE l.borrower_id = ?`,
             [borrowerRecord[0].id]
         );

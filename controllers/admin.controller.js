@@ -287,6 +287,33 @@ exports.deleteLender = async (req, res) => {
 };
 
 // Admin - Get Single Lender Details
+// Get all loans for a specific lender (Admin view)
+exports.getLenderLoans = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const [loans] = await db.execute(
+            `SELECT l.*, b.name as borrowerName, b.nrc as borrowerNRC
+             FROM loans l
+             JOIN borrowers b ON l.borrower_id = b.id
+             WHERE l.lender_id = ?
+             ORDER BY l.created_at DESC`,
+            [id]
+        );
+
+        for (let loan of loans) {
+            const [installments] = await db.execute(
+                'SELECT * FROM loan_installments WHERE loan_id = ? ORDER BY due_date ASC',
+                [loan.id]
+            );
+            loan.instalmentSchedule = installments;
+        }
+
+        res.json(loans);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 exports.getLenderDetails = async (req, res) => {
     try {
         const { id } = req.params;

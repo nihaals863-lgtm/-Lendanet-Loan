@@ -194,6 +194,7 @@ CREATE TABLE IF NOT EXISTS system_settings (
 INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('borrower_self_registration', 'true');
 INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('default_threshold', '3');
 INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('default_period_days', '30');
+INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('collateral_upload_enabled', 'true');
 
 -- 16. Seed Membership Plans
 INSERT IGNORE INTO membership_plans (id, name, price, duration_days, features_json, status) VALUES
