@@ -101,6 +101,51 @@ exports.undoMarkAsPaid = async (req, res) => {
     }
 };
 
+// Reverse Payment for a specific installment
+exports.reversePayment = async (req, res) => {
+    try {
+        const { id } = req.params; // Loan ID
+        const { installmentId } = req.body;
+
+        console.log(`[REVERSE] Reversing payment for Loan: ${id}, Installment: ${installmentId}`);
+
+        if (!installmentId) {
+            return res.status(400).json({ message: 'Installment ID is required' });
+        }
+
+        // 1. Delete payment records for this installment
+        const [delResult] = await db.execute(
+            'DELETE FROM payments WHERE loan_id = ? AND installment_id = ?',
+            [id, installmentId]
+        );
+        console.log(`[REVERSE] Deleted ${delResult.affectedRows} payment records`);
+
+        // 2. Reset installment status
+        const [insResult] = await db.execute(
+            'UPDATE loan_installments SET status = "pending", paid_amount = 0, paid_at = NULL WHERE id = ?',
+            [installmentId]
+        );
+        console.log(`[REVERSE] Updated ${insResult.affectedRows} installment record to pending`);
+
+        // 3. Set loan status back to active (if it was paid or default)
+        const [loanResult] = await db.execute('UPDATE loans SET status = "active" WHERE id = ?', [id]);
+        console.log(`[REVERSE] Reverted loan status to active (ID: ${id})`);
+
+        // 4. Remove from default ledger (in case it was there)
+        await db.execute('DELETE FROM default_ledger WHERE loan_id = ?', [id]);
+        console.log(`[REVERSE] Removed loan from default ledger (if applicable)`);
+
+        // 5. Add Audit Log
+        await db.execute('INSERT INTO audit_logs (action, user_id, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)', 
+            ['REVERSE_PAYMENT', req.user.id, 'loan', id, `Payment reversed for installment ID: ${installmentId}`]);
+
+        res.json({ message: 'Payment reversed successfully', installmentId });
+    } catch (error) {
+        console.error('[REVERSE ERROR]', error);
+        res.status(500).json({ message: 'Server error reversing payment' });
+    }
+};
+
 // Mark Default (Logic: Based on configured system threshold)
 exports.markDefault = async (req, res) => {
     try {

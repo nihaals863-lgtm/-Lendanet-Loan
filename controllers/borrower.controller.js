@@ -136,11 +136,21 @@ exports.getLenderBorrowers = async (req, res) => {
 
         // 4. Map risk and filter sensitive data
         const formatted = borrowers.map(b => {
-             let risk = 'GREEN';
-             if (b.totalDefaults > 0 || b.missedCount >= threshold) risk = 'RED';
-             else if (b.missedCount > 0) risk = 'AMBER';
+             // 4. Calculate Dynamic Credit Score (800 - 1400)
+             let score = 1400;
+             score -= (b.totalDefaults * 150);
+             score -= (b.missedCount * 100);
+             score -= (b.totalLoans * 10); // Slight reduction for exposure
              
-             const result = { ...b, risk };
+             // Ensure score floor
+             if (score < 800) score = 800;
+
+             // Map Risk Level
+             let risk = 'GREEN';
+             if (score < 1000) risk = 'RED';
+             else if (score < 1200) risk = 'AMBER';
+             
+             const result = { ...b, risk, score };
              
              // If free tier, hide risk level if required (though user said free user can add/manage borrowers)
              // But user also said "Restrict: Risk score, Advanced data, Default ledger"
@@ -190,24 +200,24 @@ exports.getRiskSummary = async (req, res) => {
         const [relation] = await db.execute('SELECT id FROM lender_borrowers WHERE lender_id = ? AND borrower_id = ?', [lenderId, id]);
         const hasRelation = relation.length > 0;
 
-        // 4. Simple Risk Engine Logic
-        let riskLevel = 'Green';
-        
-        const [settingsRows] = await db.execute('SELECT setting_value FROM system_settings WHERE setting_key = "default_threshold"');
-        const threshold = settingsRows.length > 0 ? parseInt(settingsRows[0].setting_value) : 3;
+        // 4. Score-Based Risk Engine (800 - 1400)
+        const [missed] = await db.execute(
+            `SELECT COUNT(*) as missedCount FROM loan_installments li
+             JOIN loans l ON li.loan_id = l.id
+             WHERE l.borrower_id = ? AND li.status = 'pending' AND li.due_date < CURRENT_DATE`,
+            [id]
+        );
+        const missedCount = missed[0].missedCount;
 
-        if (stats[0].defaultCount > 0) {
-            riskLevel = 'Red';
-        } else if (stats[0].totalLoans > 0) {
-            const [missed] = await db.execute(
-                `SELECT COUNT(*) as missedCount FROM loan_installments li
-                 JOIN loans l ON li.loan_id = l.id
-                 WHERE l.borrower_id = ? AND li.status = 'pending' AND li.due_date < CURRENT_DATE`,
-                [id]
-            );
-            if (missed[0].missedCount >= threshold) riskLevel = 'Red';
-            else if (missed[0].missedCount > 0) riskLevel = 'Amber';
-        }
+        let score = 1400;
+        score -= (stats[0].defaultCount * 150);
+        score -= (missedCount * 100);
+        score -= (stats[0].totalLoans * 10);
+        if (score < 800) score = 800;
+
+        let riskLevel = 'Green';
+        if (score < 1000) riskLevel = 'Red';
+        else if (score < 1200) riskLevel = 'Amber';
 
         const response = {
             borrower: {
@@ -224,6 +234,7 @@ exports.getRiskSummary = async (req, res) => {
             response.message = 'Upgrade to Premium to view risk data.';
         } else {
             response.riskLevel = riskLevel;
+            response.creditScore = score;
             response.totalLoans = stats[0].totalLoans;
             response.activeLoans = stats[0].activeLoans;
             response.defaultCount = stats[0].defaultCount;

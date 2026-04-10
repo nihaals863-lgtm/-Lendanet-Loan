@@ -101,8 +101,29 @@ exports.getBorrowerStats = async (req, res) => {
             LIMIT 5
         `, [bId]);
 
+        // 4. Calculate Risk & Score (800 - 1400)
+        const [missed] = await db.execute(
+            `SELECT COUNT(*) as missedCount FROM loan_installments li
+             JOIN loans l ON li.loan_id = l.id
+             WHERE l.borrower_id = ? AND li.status = 'pending' AND li.due_date < CURRENT_DATE`,
+            [bId]
+        );
+        const missedCount = missed[0].missedCount;
+
+        let score = 1400;
+        score -= (counts[0].defaultedLoans * 150);
+        score -= (missedCount * 100);
+        score -= (counts[0].totalLoans * 10);
+        if (score < 800) score = 800;
+
+        let riskLevel = 'GREEN';
+        if (score < 1000) riskLevel = 'RED';
+        else if (score < 1200) riskLevel = 'AMBER';
+
         res.json({
             ...counts[0],
+            risk: riskLevel,
+            score: score,
             recentActivity: recent,
             profile: {
                 dob: borrowerRecord[0].dob,

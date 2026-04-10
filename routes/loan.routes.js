@@ -14,6 +14,7 @@ const upload = multer({ storage });
 router.post('/', protect, loanController.createLoan);
 router.get('/', protect, loanController.getLoans);
 router.post('/:id/payment', protect, loanController.addPayment);
+router.post('/:id/reverse-payment', protect, loanController.reversePayment);
 router.post('/:id/undo-paid', protect, loanController.undoMarkAsPaid);
 router.put('/:id/default', protect, loanController.markDefault);
 router.post('/:id/collateral', protect, upload.array('files', 5), loanController.uploadCollateral);
